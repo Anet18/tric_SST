@@ -330,6 +330,7 @@ class LCG
 };
 
 // locks
+/*
 #ifdef USE_OPENMP_LOCK
 #else
 #ifdef USE_SPINLOCK 
@@ -354,5 +355,5 @@ void unlock() {
 #endif
 }
 #endif
-
+*/
 #endif // UTILS

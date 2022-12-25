@@ -1,4 +1,5 @@
-CXX = mpicxx
+#CXX = mpicxx
+CXX = sst++
 DBGFLAGS = -g -fomit-frame-pointer
 OPTFLAGS = $(DBGFLAGS) -O3 -DPRINT_EXTRA_NEDGES  #-DAGGR_HASH2 #-DAGGR_PUSH #-DAGGR_HEUR -DAGGR_PUSH -DAGGR_HASH -DAGGR_BUFR#-DDEBUG_PRINTF #-DAGGR_MAP -DUSE_STD_UNO_MAP_MAP #-DUSE_STD_MAP #-DAGGR_HEUR -DAGGR_MAP -DDEBUG_PRINTF -DAGGR_BUFR -DAGGR_BUFR_RMA#-DDEBUG_PRINTF   
 # -DAGGR_BUFR(_RMA) for suspend-resume buffered version
@@ -6,7 +7,7 @@ OPTFLAGS = $(DBGFLAGS) -O3 -DPRINT_EXTRA_NEDGES  #-DAGGR_HASH2 #-DAGGR_PUSH #-DA
 #  add extra edges randomly on a generated graph
 # use export ASAN_OPTIONS=verbosity=1 to check ASAN output
 SNTFLAGS = -std=c++11 -fsanitize=address -O1 -fno-omit-frame-pointer
-CXXFLAGS = -std=c++11 $(OPTFLAGS) -I.
+CXXFLAGS = -std=c++11 -fPIC -g $(OPTFLAGS) -I.
 LDFLAGS = ./murmurhash/MurmurHash3.a
 
 OBJ = main.o

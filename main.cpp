@@ -90,6 +90,8 @@
 #include "cfastric.hpp"
 #endif
 
+
+/*
 static std::string inputFileName;
 static int me, nprocs;
 static int ranksPerNode = 1;
@@ -101,6 +103,7 @@ static bool randomNumberLCG = false;
 static bool estimateTriangles = false;
 static bool bufferSet = false;
 static long bufferSize = -1;
+*/
 
 // parse command line parameters
 static void parseCommandLine(const int argc, char * const argv[]);
@@ -109,13 +112,100 @@ int main(int argc, char *argv[])
 {
   double t0, t1, td, td0, td1;
 
+  static std::string inputFileName;
+  int me, nprocs;
+  static int ranksPerNode = 1;
+  static GraphElem nvRGG = 0;
+  static int generateGraph = 0;
+  static bool readBalanced = false;
+  static GraphWeight randomEdgePercent = 0.0;
+  static bool randomNumberLCG = false;
+  static bool estimateTriangles = false;
+  static bool bufferSet = false;
+  static long bufferSize = -1;
+
   MPI_Init(&argc, &argv);
 
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
   MPI_Comm_rank(MPI_COMM_WORLD, &me);
 
   // command line options
-  parseCommandLine(argc, argv);
+  //parseCommandLine(argc, argv);
+  int ret;
+  optind = 1;
+
+  while ((ret = getopt(argc, argv, "f:br:t:n:wlp:s")) != -1) {
+    switch (ret) {
+    case 'f':
+        inputFileName.assign(optarg);
+        break;
+      case 'b':
+        readBalanced = true;
+        break;
+      case 'r':
+        ranksPerNode = atoi(optarg);
+        break;
+      case 'n':
+        nvRGG = atol(optarg);
+        if (nvRGG > 0)
+          generateGraph = true; 
+        break;
+      case 'l':
+        randomNumberLCG = true;
+        break;
+      case 'p':
+        randomEdgePercent = atof(optarg);
+        break;
+      case 'o':
+        estimateTriangles = true;
+        break;
+      case 's':
+        bufferSet = true;
+        bufferSize = atol(optarg);
+        break;
+      default:
+        assert(0 && "Should not reach here!!");
+        break;
+    }
+  }
+  // warnings/info
+
+  if (me == 0 && generateGraph && readBalanced) 
+  {
+    std::cout << "Balanced read (option -b) is only applicable for real-world graphs. "
+      << "This option does nothing for generated (synthetic) graphs." << std::endl;
+  } 
+
+  // errors
+  if (me == 0 && (argc == 1)) 
+  {
+    std::cerr << "Must specify some options." << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, -99);
+  }
+
+  if (me == 0 && !generateGraph && inputFileName.empty()) 
+  {
+    std::cerr << "Must specify a binary file name with -f or provide parameters for generating a graph." << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, -99);
+  }
+
+  if (me == 0 && !generateGraph && randomNumberLCG) 
+  {
+    std::cerr << "Must specify -g for graph generation using LCG." << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, -99);
+  }
+
+  if (me == 0 && !generateGraph && (randomEdgePercent > 0.0)) 
+  {
+    std::cerr << "Must specify -g for graph generation first to add random edges to it." << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, -99);
+  } 
+
+  if (me == 0 && generateGraph && ((randomEdgePercent < 0.0) || (randomEdgePercent >= 100.0))) 
+  {
+    std::cerr << "Invalid random edge percentage for generated graph!" << std::endl;
+    MPI_Abort(MPI_COMM_WORLD, -99);
+  }
 
   Graph* g = nullptr;
 
@@ -146,7 +236,7 @@ int main(int argc, char *argv[])
       g = rm.read_balanced(me, nprocs, ranksPerNode, inputFileName);
     }
     else
-      g = rm.read(me, nprocs, ranksPerNode, inputFileName);
+      g = rm.read1(me, nprocs, ranksPerNode, inputFileName);
   }
 
 #if defined(PRINT_GRAPH_EDGES)        
@@ -212,6 +302,8 @@ int main(int argc, char *argv[])
 #else
   TriangulateAggrFatCompressed tr(g);
 #endif
+
+
   MPI_Barrier(MPI_COMM_WORLD);
 
   t0 = MPI_Wtime();
@@ -241,7 +333,7 @@ int main(int argc, char *argv[])
     std::cout << "Number of triangles: " << ntris << std::endl;
 
     std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
-    std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
+    //std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
   }
 
   tr.clear(); 
@@ -252,6 +344,7 @@ int main(int argc, char *argv[])
   return 0;
 }
 
+/*
 void parseCommandLine(const int argc, char * const argv[])
 {
   int ret;
@@ -330,3 +423,4 @@ void parseCommandLine(const int argc, char * const argv[])
     MPI_Abort(MPI_COMM_WORLD, -99);
   }
 } // parseCommandLine
+*/
