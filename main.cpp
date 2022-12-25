@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
   int ret;
   optind = 1;
 
-  while ((ret = getopt(argc, argv, "f:br:t:n:wlp:s")) != -1) {
+  while ((ret = getopt(argc, argv, "f:r:n:p:olbs:")) != -1) {
     switch (ret) {
     case 'f':
         inputFileName.assign(optarg);
