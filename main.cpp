@@ -53,42 +53,7 @@
 
 #include <mpi.h>
 
-#if defined(NO_AGGR)    
-#include "tric.hpp"
-#elif defined(PART_AGGR)
-#include "atric.hpp"
-#elif defined(AGGR_COLL)
-#include "fastric.hpp"
-#elif defined(COLL_DTYPE)
-#include "dfastric.hpp"
-#elif defined(COLL_BATCH)
-#include "bfastric.hpp"
-#elif defined(AGGR_BUFR) // aggregate buffered
-#include "bufastric.hpp"
-#elif defined(AGGR_BUFR_RMA)
-#error This version may hang due to a bug!!!
-#include "rmabufastric.hpp"
-#elif defined(AGGR_HEUR) // comm-avoiding heuristics
 #include "hbufastric.hpp"
-#elif defined(AGGR_HASH) // one-way hash-based edge query + buffered comm
-#include "hashfastric.hpp"
-#elif defined(AGGR_HASH2) // one-way hash-based edge query + buffered comm
-#include "hashfastric2.hpp"
-#elif defined(AGGR_PUSH) // two-way hash-based edge query + buffered comm
-#include "bhashfastric.hpp"
-#elif defined(REMOTE_HASH) // one-way hash-based edge query + bulk comm
-#include "chashfastric.hpp"
-#elif defined(AGGR_MAP) // aggregate buffered + heuristics using map
-#include "mbufastric.hpp"
-#elif defined(STM8_ONESIDED)
-#error The logic of estimating counts is wrong, use another version!!!
-#include "estric.hpp"
-#elif defined(ESTIMATE_COUNTS)
-#error The logic of estimating counts is wrong, use another version!!!
-#include "es2tric.hpp"
-#else // aggregate compressed - high memory overhead
-#include "cfastric.hpp"
-#endif
 
 
 /*
