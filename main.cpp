@@ -232,41 +232,10 @@ int main(int argc, char *argv[])
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-#if defined(NO_AGGR)    
-  Triangulate tr(g);
-#elif defined(PART_AGGR)
-  TriangulateAggr tr(g);
-#elif defined(AGGR_COLL)
-  TriangulateAggrFat tr(g);
-#elif defined(COLL_DTYPE)
-  TriangulateAggrFatDtype tr(g);
-#elif defined(COLL_BATCH)
-  TriangulateAggrFatBatch tr(g);
-#elif defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
-  TriangulateEstimate tr(g);
-#elif defined(REMOTE_HASH)
-  TriangulateHashRemote tr(g, bufferSize);
-#elif defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
-#if defined(AGGR_BUFR)
-  TriangulateAggrBuffered tr(g, bufferSize);
-#elif defined(AGGR_BUFR_RMA)
-  TriangulateAggrBufferedRMA tr(g, bufferSize);
-#elif defined(AGGR_MAP)
-  TriangulateAggrBufferedMap tr(g, bufferSize);
-#elif defined(AGGR_HASH)
-  TriangulateAggrBufferedHash tr(g, bufferSize);
-#elif defined(AGGR_HASH2)
-  TriangulateAggrBufferedHash2 tr(g, bufferSize);
-#elif defined(AGGR_PUSH)
-  TriangulateAggrBufferedHashPush tr(g, bufferSize);
-#else
+  
   TriangulateAggrBufferedHeuristics tr(g, bufferSize);
-#endif
-#else
-  TriangulateAggrFatCompressed tr(g);
-#endif
 
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -284,24 +253,13 @@ int main(int argc, char *argv[])
     std::cout << "Average execution time (secs.) for distributed counting on " << nprocs << " processes: " 
       << avg_t << std::endl;
 
-    if (estimateTriangles)
-#if defined(STM8_ONESIDED) || defined(ESTIMATE_COUNTS)
-      std::cout << "Estimated number of triangles: " << ntris << std::endl;
-#else
     std::cout << "Number of triangles: " << ntris << std::endl;
-#endif
-    else
-#if defined(AGGR_BUFR) || defined(AGGR_BUFR_RMA) || defined(AGGR_HEUR) || defined(AGGR_MAP) || defined(AGGR_HASH) || defined(AGGR_HASH2) || defined(AGGR_PUSH)
-
-      std::cout << "User initialized per-PE buffer count: " << bufferSize << std::endl;
-#endif
-    std::cout << "Number of triangles: " << ntris << std::endl;
-
     std::cout << "TEPS: " << g->get_ne()/avg_t << std::endl;
     //std::cout << "Resolution of MPI_Wtime: " << MPI_Wtick() << std::endl;
   }
 
   tr.clear(); 
+  
   MPI_Barrier(MPI_COMM_WORLD);
 
   MPI_Finalize();
