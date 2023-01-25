@@ -77,17 +77,17 @@ int main(int argc, char *argv[])
 {
   double t0, t1, td, td0, td1;
 
-  static std::string inputFileName;
+  std::string inputFileName;
   int me, nprocs;
-  static int ranksPerNode = 1;
-  static GraphElem nvRGG = 0;
-  static int generateGraph = 0;
-  static bool readBalanced = false;
-  static GraphWeight randomEdgePercent = 0.0;
-  static bool randomNumberLCG = false;
-  static bool estimateTriangles = false;
-  static bool bufferSet = false;
-  static long bufferSize = -1;
+  int ranksPerNode = 1;
+  GraphElem nvRGG = 0;
+  int generateGraph = 0;
+  bool readBalanced = false;
+  GraphWeight randomEdgePercent = 0.0;
+  bool randomNumberLCG = false;
+  bool estimateTriangles = false;
+  bool bufferSet = false;
+  long bufferSize = -1;
 
   MPI_Init(&argc, &argv);
 
