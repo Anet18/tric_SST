@@ -609,13 +609,8 @@ class TriangulateAggrBufferedHeuristics
 
           tup[1] = rbuf_[m];
 
-#if defined(USE_OPENMP)
-          if (check_edgelist_omp(tup))
-            ntriangles_ += 1;
-#else
           if (check_edgelist(tup))
             ntriangles_ += 1;
-#endif
 
           in_nghosts_ -= 1;
         }
@@ -627,22 +622,13 @@ class TriangulateAggrBufferedHeuristics
 
     inline GraphElem count()
     {
-#if defined(USE_ALLREDUCE_FOR_EXIT)
       GraphElem count;
-#else      
-      bool done = false, nbar_active = false; 
-      MPI_Request nbar_req = MPI_REQUEST_NULL;
-#endif
 
       bool sends_done = false;
       int *inds = new int[pdegree_];
       int over = -1;
 
-#if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
-#else
-      while(!done)
-#endif
       {  
         if (out_nghosts_ == 0)
         {
@@ -668,28 +654,12 @@ class TriangulateAggrBufferedHeuristics
             stat_[idx] = '0';
           }
         }
-
-#if defined(USE_ALLREDUCE_FOR_EXIT)
+        
         count = in_nghosts_;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
         if (count == 0)
           break;
-#else       
-        if (nbar_active)
-        {
-          int test_nbar = -1;
-          MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
-          done = !test_nbar ? false : true;
-        }
-        else
-        {
-          if (in_nghosts_ == 0)
-          {
-            MPI_Ibarrier(comm_, &nbar_req);
-            nbar_active = true;
-          }
-        }
-#endif
+
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
