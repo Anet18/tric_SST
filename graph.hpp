@@ -60,8 +60,6 @@
 
 #include "utils.hpp"
 
-unsigned seed;
-
 struct Edge
 {
     GraphElem tail_;
@@ -732,11 +730,8 @@ class GenerateRGG
             // measure the time to generate random numbers
             MPI_Barrier(MPI_COMM_WORLD);
             double st = MPI_Wtime();
-
+            
             if (!isLCG) {
-                // set seed (declared an extern in utils)
-                seed = (unsigned)reseeder(1);
-
 #if defined(PRINT_RANDOM_XY_COORD)
                 for (int k = 0; k < nprocs_; k++) {
                     if (k == rank_) {

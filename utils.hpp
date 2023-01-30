@@ -91,8 +91,6 @@ const MPI_Datatype MPI_GRAPH_TYPE = MPI_INT64_T;
 const MPI_Datatype MPI_WEIGHT_TYPE = MPI_DOUBLE;
 #endif
 
-extern unsigned seed;
-
 #ifndef DEFAULT_BUF_SIZE
 #define DEFAULT_BUF_SIZE   (8000)
 #endif
