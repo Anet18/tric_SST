@@ -56,6 +56,14 @@
 #define TAG_DATA 100
 #endif
 
+#ifndef TAG_PROBE
+#define TAG_PROBE 200
+#endif
+
+#ifndef TAG_DUMMY
+#define TAG_DUMMY 300
+#endif
+
 #ifndef BLOOMFILTER_TOL
 #define BLOOMFILTER_TOL 1E-09
 #endif
@@ -153,7 +161,7 @@ class TriangulateAggrBufferedHeuristics
 
     TriangulateAggrBufferedHeuristics(Graph* g, const GraphElem bufsize): 
       g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+      sreq_(nullptr), preq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
       prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0)
 #if defined(USE_BLOOMFILTER_PG_HEUR)
@@ -337,8 +345,10 @@ class TriangulateAggrBufferedHeuristics
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
-
+    preq_     = new MPI_Request[pdegree_];
+    
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
+    std::fill(preq_, preq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
@@ -370,6 +380,7 @@ class TriangulateAggrBufferedHeuristics
       delete []rbuf_;
       delete []sbuf_ctr_;
       delete []sreq_;
+      delete []preq_;
       delete []prev_k_;
       delete []prev_m_;
       delete []stat_;
@@ -394,6 +405,7 @@ class TriangulateAggrBufferedHeuristics
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
+        MPI_Isend(&sbuf_ctr_[pindex_[owner]], 1, MPI_GRAPH_TYPE, owner, TAG_PROBE, comm_, &preq_[pindex_[owner]]);
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
@@ -403,6 +415,15 @@ class TriangulateAggrBufferedHeuristics
     {
       for (int const& p : targets_)
         nbsend(p);
+    }
+
+    void sends_per_iter()
+    {
+      for (int const& p : targets_)
+      {
+        if (stat_[pindex_[p]] == '0')
+          MPI_Isend(NULL, 0, MPI_DATATYPE_NULL, p, TAG_DUMMY, comm_, &preq_[pindex_[p]]);
+      }
     }
 
     inline void lookup_edges()
@@ -504,6 +525,7 @@ class TriangulateAggrBufferedHeuristics
           }
         }
       }
+      sends_per_iter();
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -565,6 +587,7 @@ class TriangulateAggrBufferedHeuristics
       return false;
     }
 
+#if 0
     inline void process_messages()
     {
       MPI_Status status;
@@ -619,17 +642,69 @@ class TriangulateAggrBufferedHeuristics
         prev = k;
       }
     }
+#endif
+
+    inline void process_messages()
+    {
+      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, count = 0;
+      MPI_Status status;
+
+      MPI_Recv(&count, 1, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
+          MPI_ANY_TAG, comm_, &status); 
+
+      if (status.MPI_TAG == TAG_DUMMY)
+        return;
+
+      MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, status.MPI_SOURCE, 
+          TAG_DATA, comm_, MPI_STATUS_IGNORE);  
+
+      while(1)
+      {
+        if (k == count)
+          break;
+
+        if (rbuf_[k] == -1)
+        {
+          k += 1;
+          prev = k;
+          continue;
+        }
+
+        tup[0] = rbuf_[k];
+        GraphElem curr_count = 0;
+
+        for (GraphElem m = k + 1; m < count; m++)
+        {
+          if (rbuf_[m] == -1)
+          {
+            curr_count = m + 1;
+            break;
+          }
+
+          tup[1] = rbuf_[m];
+
+          if (check_edgelist(tup))
+            ntriangles_ += 1;
+
+          in_nghosts_ -= 1;
+        }
+
+        k += (curr_count - prev);
+        prev = k;
+      }
+    }
+
 
     inline GraphElem count()
     {
-      GraphElem count;
-
       bool sends_done = false;
+      int pending = 0;
       int *inds = new int[pdegree_];
+      MPI_Status *statuses = new MPI_Status[pdegree_];
       int over = -1;
 
       while(1)
-      {  
+      { 
         if (out_nghosts_ == 0)
         {
           if (!sends_done)
@@ -643,21 +718,27 @@ class TriangulateAggrBufferedHeuristics
 
         process_messages();
 
-        MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
+        MPI_Testsome(pdegree_, preq_, &over, inds, statuses);
 
         if (over != MPI_UNDEFINED)
         {
           for (int i = 0; i < over; i++)
           {
             GraphElem idx = static_cast<GraphElem>(inds[i]);
-            sbuf_ctr_[idx] = 0;
-            stat_[idx] = '0';
+
+            if (statuses[idx].MPI_TAG == TAG_PROBE)
+            {
+              MPI_Wait(&sreq_[idx], MPI_STATUS_IGNORE);
+
+              sbuf_ctr_[idx] = 0;
+              stat_[idx] = '0';
+            }
           }
         }
-        
-        count = in_nghosts_;
-        MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
-        if (count == 0)
+
+        pending = in_nghosts_;
+        MPI_Allreduce(MPI_IN_PLACE, &pending, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
+        if (pending == 0)
           break;
 
 #if defined(DEBUG_PRINTF)
@@ -669,8 +750,8 @@ class TriangulateAggrBufferedHeuristics
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      free(inds);
-
+      delete []inds;
+      
       return (ttc/3);
     }
 
@@ -679,7 +760,7 @@ class TriangulateAggrBufferedHeuristics
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
-    MPI_Request *sreq_;
+    MPI_Request *sreq_, *preq_;
     char *stat_;
 #if defined(USE_BLOOMFILTER_PG_HEUR)
     Bloomfilter *bf_;
