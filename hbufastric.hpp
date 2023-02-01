@@ -649,14 +649,20 @@ class TriangulateAggrBufferedHeuristics
       GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, count = 0;
       MPI_Status status;
 
+      if (!in_nghosts_)
+        return;
+
       MPI_Recv(&count, 1, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
           MPI_ANY_TAG, comm_, &status); 
 
       if (status.MPI_TAG == TAG_DUMMY)
         return;
-
-      MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, status.MPI_SOURCE, 
-          TAG_DATA, comm_, MPI_STATUS_IGNORE);  
+      
+      if (status.MPI_TAG == TAG_PROBE)
+      {
+        MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, status.MPI_SOURCE, 
+            TAG_DATA, comm_, MPI_STATUS_IGNORE);  
+      }
 
       while(1)
       {
@@ -751,6 +757,7 @@ class TriangulateAggrBufferedHeuristics
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
       delete []inds;
+      delete []statuses;
       
       return (ttc/3);
     }
