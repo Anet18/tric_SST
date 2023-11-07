@@ -53,7 +53,7 @@
 
 #include <mpi.h>
 
-#include "hbufastric.hpp"
+#include "ibufastric.hpp"
 
 int main(int argc, char *argv[])
 {
@@ -216,7 +216,7 @@ int main(int argc, char *argv[])
   if (bufferSize < 100)
     bufferSize = DEFAULT_BUF_SIZE;
   
-  TriangulateAggrBufferedHeuristics tr(g, bufferSize);
+  TriangulateAggrBufferedIrecv tr(g, bufferSize);
 
 
   MPI_Barrier(MPI_COMM_WORLD);

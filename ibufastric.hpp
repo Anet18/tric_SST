@@ -37,8 +37,8 @@
 //
 // ************************************************************************ 
 #pragma once
-#ifndef BUF_HFASTRIC_HPP
-#define BUF_HFASTRIC_HPP
+#ifndef IBUFASTRIC_HPP
+#define IBUFASTRIC_HPP
 
 #include "graph.hpp"
 
@@ -53,120 +53,19 @@
 #include <string> 
 
 #ifndef TAG_DATA
-#define TAG_DATA 100
+#define TAG_DATA  (100)
 #endif
 
-#ifndef TAG_PROBE
-#define TAG_PROBE 200
-#endif
-
-#ifndef TAG_DUMMY
-#define TAG_DUMMY 300
-#endif
-
-#ifndef BLOOMFILTER_TOL
-#define BLOOMFILTER_TOL 1E-09
-#endif
-
-#include "murmurhash/MurmurHash3.h"
-
-class Bloomfilter
-{
-  public:
-    Bloomfilter(GraphElem n, GraphWeight p=BLOOMFILTER_TOL) 
-      : n_(pow(2, std::ceil(log(n)/log(2)))), p_(p)
-    {
-      m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
-      k_ = std::round((m_ / n_) * log(2));
-
-      hashes_.resize(k_); 
-      bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), true);
-
-      if (k_ == 0)
-        throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
-    }
-        
-    Bloomfilter(GraphElem n, GraphElem k, GraphWeight p) 
-      : n_(pow(2, std::ceil(log(n)/log(2)))), k_(k), p_(p)
-    {
-      m_ = std::ceil((n_ * log(p_)) / log(1 / pow(2, log(2))));
-
-      if (k_%2 != 0)
-        k_ += 1;
-
-      hashes_.resize(k_); 
-      bits_.resize(m_);
-      std::fill(bits_.begin(), bits_.end(), true);
-
-      if (k_ == 0)
-        throw std::invalid_argument("Bloomfilter could not be initialized: k must be larger than 0");
-    }
-
-    void insert(GraphElem const& i, GraphElem const& j)
-    {
-      hash(i, j);
-      for (GraphElem k = 0; k < k_; k++)
-        bits_[hashes_[k]] = false;
-    }
-
-    void print() const
-    {
-      std::cout << "-------------Bloom filter statistics-------------" << std::endl;
-      std::cout << "Number of Items (n): " << n_ << std::endl;
-      std::cout << "Probability of False Positives (p): " << p_ << std::endl;
-      std::cout << "Number of bits in filter (m): " << m_ << std::endl;
-      std::cout << "Number of hash functions (k): " << k_ << std::endl;
-      std::cout << "-------------------------------------------------" << std::endl;
-    }
-
-    void clear()
-    { 
-      bits_.clear(); 
-      hashes_.clear(); 
-    }
-
-    bool contains(GraphElem i, GraphElem j) 
-    {
-      hash(i, j);
-      for (GraphElem k = 0; k < k_; k++)
-      {
-        if (bits_[hashes_[k]]) 
-          return false;
-      }
-      return true;
-    }
-
-  private:
-    GraphElem n_, m_, k_;
-    GraphWeight p_;
-
-    void hash( uint64_t lhs, uint64_t rhs ) 
-    {
-      uint64_t key[2] = {lhs, rhs};
-      for (uint64_t n = 0; n < k_; n+=2)
-      {
-        MurmurHash3_x64_128 ( &key, 2*sizeof(uint64_t), 0, &hashes_[n] );
-        hashes_[n] = hashes_[n] % m_; 
-        hashes_[n+1] = hashes_[n+1] % m_;
-      }
-    }
-    std::vector<bool> bits_;
-    std::vector<uint64_t> hashes_;
-};
-
-class TriangulateAggrBufferedHeuristics
+class TriangulateAggrBufferedIrecv
 {
   public:
 
-    TriangulateAggrBufferedHeuristics(Graph* g, const GraphElem bufsize): 
-      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), pdegree_(0), 
-      sreq_(nullptr), preq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
+    TriangulateAggrBufferedIrecv(Graph* g, const GraphElem bufsize): 
+      g_(g), sbuf_ctr_(nullptr), sbuf_(nullptr), rbuf_(nullptr), 
+      pdegree_(0), sreq_(nullptr), erange_(nullptr), vcount_(nullptr), ntriangles_(0), 
       nghosts_(0), out_nghosts_(0), in_nghosts_(0), pindex_(0), prev_m_(nullptr), 
-      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0)
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-      , bf_(nullptr)
-#endif
+      prev_k_(nullptr), stat_(nullptr), targets_(0), bufsize_(0), data_rreq_(MPI_REQUEST_NULL),
+      recv_act_(false)
   {
     comm_ = g_->get_comm();
     MPI_Comm_size(comm_, &size_);
@@ -240,12 +139,7 @@ class TriangulateAggrBufferedHeuristics
             
             if (!edge_within_max(edge_m.tail_, edge_n.tail_))
               break;
-            if (!edge_above_min(edge_m.tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge_m.tail_))
-              continue;
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-            if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-              continue;
-#endif  
+
             send_count[owner] += 1;
             vcount_[i] += 1;
           }
@@ -274,52 +168,6 @@ class TriangulateAggrBufferedHeuristics
     t0 = MPI_Wtime();
 
     MPI_Barrier(comm_);
-    
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-    std::vector<int> rdispls(size_, 0), sdispls(size_, 0), scounts(size_, 0), rcounts(size_, 0);
-    std::vector<int> source_counts(size_, 0);
-    const int targets_size = targets_.size();
-    MPI_Allgather(&targets_size, 1, MPI_INT, source_counts.data(), 1, MPI_INT, comm_);
-
-    int sdisp = 0, rdisp = 0;
-
-    for (int p = 0; p < size_; p++)
-    {
-      rdispls[p] = rdisp;
-      rdisp += source_counts[p];
-    }
-
-    std::vector<int> source_data(rdisp, 0);
-
-    MPI_Allgatherv(targets_.data(), targets_size, MPI_INT, source_data.data(), 
-        source_counts.data(), rdispls.data(), MPI_INT, comm_);
-
-    // TODO FIXME overallocation & multiple
-    // insertions (wasted cycles), unique 
-    // neighbors + 1 is ideal
-    bf_ = new Bloomfilter(rdisp*2);
-
-    for (int p = 0; p < size_; p++)
-    {
-      if (source_counts[p] > 0)
-      {
-        for (int n = 0; n < source_counts[p]; n++)
-            bf_->insert(p, source_data[n + rdispls[p]]);
-      }
-    }
-
-    if (rank_ == 0)
-      bf_->print();
-
-    sdispls.clear();
-    rdispls.clear();
-    scounts.clear();
-    rcounts.clear();
-    sdispls.clear();
-    rdispls.clear();
-    source_counts.clear();
-    source_data.clear();
-#endif
 
     // outgoing/incoming data and buffer size
     MPI_Alltoall(send_count, 1, MPI_GRAPH_TYPE, recv_count, 1, MPI_GRAPH_TYPE, comm_);
@@ -332,12 +180,14 @@ class TriangulateAggrBufferedHeuristics
     
     nghosts_ = out_nghosts_ + in_nghosts_;
 
-    bufsize_ = ((nghosts_*3) < bufsize) ? (nghosts_*3) : bufsize;
+    bufsize_ = ((nghosts_*2) < bufsize) ? (nghosts_*2) : bufsize;
+
     MPI_Allreduce(MPI_IN_PLACE, &bufsize_, 1, MPI_GRAPH_TYPE, MPI_MAX, comm_);
 
     if (rank_ == 0)
       std::cout << "Adjusted Per-PE buffer count: " << bufsize_ << std::endl;
     
+    // 2 is the buffer header size
     rbuf_     = new GraphElem[bufsize_];
     sbuf_     = new GraphElem[pdegree_*bufsize_];
     sbuf_ctr_ = new GraphElem[pdegree_]();
@@ -345,10 +195,8 @@ class TriangulateAggrBufferedHeuristics
     prev_m_   = new GraphElem[pdegree_];
     stat_     = new char[pdegree_];
     sreq_     = new MPI_Request[pdegree_];
-    preq_     = new MPI_Request[pdegree_];
-    
+
     std::fill(sreq_, sreq_ + pdegree_, MPI_REQUEST_NULL);
-    std::fill(preq_, preq_ + pdegree_, MPI_REQUEST_NULL);
     std::fill(prev_k_, prev_k_ + pdegree_, -1);
     std::fill(prev_m_, prev_m_ + pdegree_, -1);
     std::fill(stat_, stat_ + pdegree_, '0');
@@ -368,19 +216,14 @@ class TriangulateAggrBufferedHeuristics
     delete []recv_count;
   }
 
-    ~TriangulateAggrBufferedHeuristics() {}
+    ~TriangulateAggrBufferedIrecv() {}
 
     void clear()
     {
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-      bf_->clear();
-      delete bf_;
-#endif
       delete []sbuf_;
       delete []rbuf_;
       delete []sbuf_ctr_;
       delete []sreq_;
-      delete []preq_;
       delete []prev_k_;
       delete []prev_m_;
       delete []stat_;
@@ -391,21 +234,10 @@ class TriangulateAggrBufferedHeuristics
       targets_.clear();
     }
 
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-    // x/y are processes
-    inline bool is_connected_pes(GraphElem const& x, GraphElem const& y)
-    {
-      if ((x == y) || bf_->contains(x,y) || bf_->contains(y,x))
-        return true;
-      return false;
-    }
-#endif
-
     void nbsend(GraphElem owner)
     {
       if (sbuf_ctr_[pindex_[owner]] > 0)
       {
-        MPI_Isend(&sbuf_ctr_[pindex_[owner]], 1, MPI_GRAPH_TYPE, owner, TAG_PROBE, comm_, &preq_[pindex_[owner]]);
         MPI_Isend(&sbuf_[pindex_[owner]*bufsize_], sbuf_ctr_[pindex_[owner]], 
             MPI_GRAPH_TYPE, owner, TAG_DATA, comm_, &sreq_[pindex_[owner]]);
       }
@@ -415,15 +247,6 @@ class TriangulateAggrBufferedHeuristics
     {
       for (int const& p : targets_)
         nbsend(p);
-    }
-
-    void sends_per_iter()
-    {
-      for (int const& p : targets_)
-      {
-        if (stat_[pindex_[p]] == '0')
-          MPI_Isend(NULL, 0, MPI_DATATYPE_NULL, p, TAG_DUMMY, comm_, &preq_[pindex_[p]]);
-      }
     }
 
     inline void lookup_edges()
@@ -474,12 +297,7 @@ class TriangulateAggrBufferedHeuristics
                                 
                 if (!edge_within_max(edge.edge_->tail_, edge_n.tail_))
                   break;
-                if (!edge_above_min(edge.edge_->tail_, edge_n.tail_) || !edge_above_min(edge_n.tail_, edge.edge_->tail_))
-                  continue;
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-                if (!is_connected_pes(owner, g_->get_owner(edge_n.tail_)))
-                  continue;
-#endif
+
                 if (sbuf_ctr_[pidx] == (bufsize_-1))
                 {
                   prev_m_[pidx] = m;
@@ -525,7 +343,6 @@ class TriangulateAggrBufferedHeuristics
           }
         }
       }
-      sends_per_iter();
     }
 
     inline bool check_edgelist(GraphElem tup[2])
@@ -572,7 +389,7 @@ class TriangulateAggrBufferedHeuristics
         return true;
       return false;
     }
-     
+         
     inline bool edge_above_min(GraphElem x, GraphElem y) const
     {
       if (y >= erange_[x*2])
@@ -587,130 +404,100 @@ class TriangulateAggrBufferedHeuristics
       return false;
     }
 
-#if 0
     inline void process_messages()
-    {
-      MPI_Status status;
-      int flag = -1;
-      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0;
-      int count = 0, source = -1;
-
-      MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm_, &flag, &status);
-
-      if (flag)
-      { 
-        source = status.MPI_SOURCE;
-        MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
-        MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, source, 
-            TAG_DATA, comm_, MPI_STATUS_IGNORE);       
-      }
-      else
-        return;
-
-      while(1)
+    {     
+      while(recv_act_)
       {
-        if (k == count)
-          break;
+        int flag_rreq;
+        MPI_Status status;
+        int count = -1;
+        GraphElem tup[2] = {-1,-1}, prev = 0, disp = 0;
 
-        if (rbuf_[k] == -1)
-        {
-          k += 1;
-          prev = k;
-          continue;
-        }
+        MPI_Test(&data_rreq_, &flag_rreq, &status);
 
-        tup[0] = rbuf_[k];
-        GraphElem curr_count = 0;
+        if (flag_rreq)
+        {  
+          recv_act_ = false;
+          MPI_Get_count(&status, MPI_GRAPH_TYPE, &count);
 
-        for (GraphElem m = k + 1; m < count; m++)
-        {
-          if (rbuf_[m] == -1)
+          if (count > 0)
           {
-            curr_count = m + 1;
-            break;
-          }
+            for (GraphElem k = 0; k < count;)
+            {
+              if (rbuf_[k] == -1)
+              {
+                k += 1;
+                prev = k;
+                continue;
+              }
 
-          tup[1] = rbuf_[m];
+              tup[0] = rbuf_[k];
+              GraphElem curr_count = 0;
 
-          if (check_edgelist(tup))
-            ntriangles_ += 1;
+              for (GraphElem m = k + 1; m < count; m++)
+              {
+                if (rbuf_[m] == -1)
+                {
+                  curr_count = m + 1;
+                  break;
+                }
 
-          in_nghosts_ -= 1;
-        }
+                tup[1] = rbuf_[m];
 
-        k += (curr_count - prev);
-        prev = k;
-      }
-    }
+#if defined(USE_OPENMP)
+                if (check_edgelist_omp(tup))
+                  ntriangles_ += 1;
+#else
+                if (check_edgelist(tup))
+                  ntriangles_ += 1;
 #endif
 
-    inline void process_messages()
-    {
-      GraphElem tup[2] = {-1,-1}, k = 0, prev = 0, count = 0;
-      MPI_Status status;
+                in_nghosts_ -= 1;
+              }
 
-      if (!in_nghosts_)
-        return;
-
-      MPI_Recv(&count, 1, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
-          MPI_ANY_TAG, comm_, &status); 
-
-      if (status.MPI_TAG == TAG_DUMMY)
-        return;
-      
-      if (status.MPI_TAG == TAG_PROBE)
-      {
-        MPI_Recv(rbuf_, count, MPI_GRAPH_TYPE, status.MPI_SOURCE, 
-            TAG_DATA, comm_, MPI_STATUS_IGNORE);  
-      }
-
-      while(1)
-      {
-        if (k == count)
-          break;
-
-        if (rbuf_[k] == -1)
-        {
-          k += 1;
-          prev = k;
-          continue;
-        }
-
-        tup[0] = rbuf_[k];
-        GraphElem curr_count = 0;
-
-        for (GraphElem m = k + 1; m < count; m++)
-        {
-          if (rbuf_[m] == -1)
-          {
-            curr_count = m + 1;
-            break;
+              k += (curr_count - prev);
+              prev = k;
+            }
           }
 
-          tup[1] = rbuf_[m];
-
-          if (check_edgelist(tup))
-            ntriangles_ += 1;
-
-          in_nghosts_ -= 1;
+          if (in_nghosts_ > 0)
+          {
+            MPI_Irecv(rbuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
+                TAG_DATA, comm_, &data_rreq_);
+            recv_act_ = true;
+          }
         }
-
-        k += (curr_count - prev);
-        prev = k;
+        else
+          break;
       }
     }
-
 
     inline GraphElem count()
     {
-      bool sends_done = false;
-      int pending = 0;
-      int *inds = new int[pdegree_];
-      MPI_Status *statuses = new MPI_Status[pdegree_];
-      int over = -1;
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+      GraphElem count;
+#else      
+      bool done = false, nbar_active = false; 
+      MPI_Request nbar_req = MPI_REQUEST_NULL;
+#endif
 
+      bool sends_done = false;
+      int *inds = new int[pdegree_];
+      int over = -1;
+     
+      if (in_nghosts_ > 0)
+      {
+        MPI_Irecv(rbuf_, bufsize_, MPI_GRAPH_TYPE, MPI_ANY_SOURCE, 
+            TAG_DATA, comm_, &data_rreq_);
+        recv_act_ = true;
+      }
+
+#if defined(USE_ALLREDUCE_FOR_EXIT)
       while(1)
-      { 
+#else
+      while(!done)
+#endif
+      {
         if (out_nghosts_ == 0)
         {
           if (!sends_done)
@@ -723,30 +510,40 @@ class TriangulateAggrBufferedHeuristics
           lookup_edges();
 
         process_messages();
-
-        MPI_Testsome(pdegree_, preq_, &over, inds, statuses);
+        
+        MPI_Testsome(pdegree_, sreq_, &over, inds, MPI_STATUSES_IGNORE);
 
         if (over != MPI_UNDEFINED)
         {
           for (int i = 0; i < over; i++)
           {
             GraphElem idx = static_cast<GraphElem>(inds[i]);
-
-            if (statuses[idx].MPI_TAG == TAG_PROBE)
-            {
-              MPI_Wait(&sreq_[idx], MPI_STATUS_IGNORE);
-
-              sbuf_ctr_[idx] = 0;
-              stat_[idx] = '0';
-            }
+            sbuf_ctr_[idx] = 0;
+            stat_[idx] = '0';
           }
         }
 
-        pending = in_nghosts_;
-        MPI_Allreduce(MPI_IN_PLACE, &pending, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
-        if (pending == 0)
+#if defined(USE_ALLREDUCE_FOR_EXIT)
+        count = in_nghosts_;
+        MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_GRAPH_TYPE, MPI_SUM, comm_);
+        if (count == 0)
           break;
-
+#else       
+        if (nbar_active)
+        {
+          int test_nbar = -1;
+          MPI_Test(&nbar_req, &test_nbar, MPI_STATUS_IGNORE);
+          done = !test_nbar ? false : true;
+        }
+        else
+        {
+          if (in_nghosts_ == 0)
+          {
+            MPI_Ibarrier(comm_, &nbar_req);
+            nbar_active = true;
+          }
+        }
+#endif
 #if defined(DEBUG_PRINTF)
         std::cout << "in/out: " << in_nghosts_ << ", " << out_nghosts_ << std::endl;
 #endif            
@@ -756,9 +553,8 @@ class TriangulateAggrBufferedHeuristics
       MPI_Barrier(comm_);
       MPI_Reduce(&ltc, &ttc, 1, MPI_GRAPH_TYPE, MPI_SUM, 0, comm_);
 
-      delete []inds;
-      delete []statuses;
-      
+      free(inds);
+
       return (ttc/3);
     }
 
@@ -767,13 +563,11 @@ class TriangulateAggrBufferedHeuristics
 
     GraphElem ntriangles_, bufsize_, nghosts_, out_nghosts_, in_nghosts_, pdegree_;
     GraphElem *sbuf_, *rbuf_, *prev_k_, *prev_m_, *sbuf_ctr_, *vcount_, *erange_;
-    MPI_Request *sreq_, *preq_;
+    MPI_Request *sreq_, data_rreq_;
     char *stat_;
-#if defined(USE_BLOOMFILTER_PG_HEUR)
-    Bloomfilter *bf_;
-#endif
+    bool recv_act_;
+    
     std::vector<int> targets_;
-
     int rank_, size_;
     std::unordered_map<int, int> pindex_; 
     MPI_Comm comm_;
